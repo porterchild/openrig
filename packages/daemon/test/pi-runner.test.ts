@@ -693,6 +693,26 @@ describe("mapPiEvent", () => {
     expect(mapPiEvent({ type: "auto_retry_start" }).activity).toEqual({ hookEvent: "active", subtype: "auto_retry" });
   });
 
+  it("compaction_end mirrors the event's own truth, never a blanket done", () => {
+    // Success: pi emits result on completed compactions.
+    const success = mapPiEvent({ type: "compaction_end", reason: "manual", result: { messages: [] }, aborted: false, willRetry: false });
+    expect(success.mirrorLines).toEqual(["[pi] compaction done"]);
+    expect(success.errorNotice).toBeUndefined();
+    // Abort: a user abort must not read as success.
+    const aborted = mapPiEvent({ type: "compaction_end", reason: "manual", result: undefined, aborted: true, willRetry: false });
+    expect(aborted.mirrorLines).toEqual(["[pi] compaction aborted"]);
+    expect(aborted.errorNotice).toBeUndefined();
+    // Failure: pi carries the summarizer's failure text (e.g. finishReason=length).
+    const failed = mapPiEvent({ type: "compaction_end", reason: "manual", result: undefined, aborted: false, willRetry: false, errorMessage: "Compaction failed: summarizer stopped at length" });
+    expect(failed.errorNotice).toBe("[pi-runner] ERROR compaction failed: Compaction failed: summarizer stopped at length");
+    // Defensive: a failure-shaped event with no message still reports honestly.
+    const silent = mapPiEvent({ type: "compaction_end", reason: "manual", result: undefined, aborted: false, willRetry: false });
+    expect(silent.errorNotice).toBe("[pi-runner] ERROR compaction failed");
+    // The omp runtime keeps its own marker.
+    const ompFailed = mapPiEvent({ type: "compaction_end", reason: "manual", result: undefined, aborted: false, willRetry: false, errorMessage: "boom" }, "omp");
+    expect(ompFailed.errorNotice).toBe("[omp-runner] ERROR compaction failed: boom");
+  });
+
   it("leaves auto_compaction_* unmapped for Pi so an idle seat never reads as running", () => {
     for (const type of ["auto_compaction_start", "auto_compaction_end"]) {
       expect(mapPiEvent({ type })).toEqual({ mirrorLines: [] });

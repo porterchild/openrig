@@ -257,8 +257,20 @@ export function mapPiEvent(event: Record<string, unknown>, runtime: RunnerRuntim
       return { mirrorLines: [] };
     case "compaction_start":
       return { mirrorLines: [`[${runtime}] compacting context…`], activity: { hookEvent: "active", subtype: "compaction" } };
-    case "compaction_end":
+    case "compaction_end": {
+      // Pi emits the truth on compaction_end: aborted carries user aborts, errorMessage carries
+      // summarizer failures (e.g. finishReason=length on an undersized compaction model), and a
+      // failed attempt has no result. Printing "done" unconditionally masks a failed compaction as
+      // a success — the seat reads healthy while its context keeps growing. Success = result present;
+      // anything else mirrors honestly. (Auto-compaction failure paths in pi reuse this same
+      // compaction_end shape with reason "overflow".)
+      if (event.aborted === true) return { mirrorLines: [`[${runtime}] compaction aborted`] };
+      if (event.result == null) {
+        const marker = runtime === "omp" ? "[omp-runner] ERROR" : PI_RUNNER_ERROR_MARKER;
+        return { mirrorLines: [""], errorNotice: `${marker} compaction failed${typeof event.errorMessage === "string" && event.errorMessage.trim() ? `: ${event.errorMessage.slice(0, 400)}` : ""}` };
+      }
       return { mirrorLines: [`[${runtime}] compaction done`] };
+    }
     // OMP names its automatic compaction separately. Pi keeps main's mapping
     // (unmapped), so an idle Pi seat never reads as running after one.
     case "auto_compaction_start":
